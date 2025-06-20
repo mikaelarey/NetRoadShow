@@ -3,6 +3,12 @@
     public class PendingElevatorRequest
     {
         public int Floor { get; set; }
-        public List<int> Destinations { get; set; } = new List<int>();
+        public List<RequestDestination> Destinations { get; set; } = new List<RequestDestination>();
+    }
+
+    public class RequestDestination
+    {
+        public int ElevatorId { get; set; }
+        public int Destination { get; set; }
     }
 }

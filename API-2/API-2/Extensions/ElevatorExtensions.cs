@@ -1,5 +1,4 @@
-﻿using System.Runtime.CompilerServices;
-using API_2.Dto;
+﻿using API_2.Dto;
 using API_2.Enums;
 using API_2.Models;
 
@@ -7,7 +6,8 @@ namespace API_2.Extensions
 {
     public static class ElevatorExtensions
     {
-        public static bool AddStops(this Elevator elevator, ElevatorRequest request)
+        #region Add Stops - Adds stops to the elevator based on the elevator direction, and the request's current and destination floors
+        public static bool AddStops(this Elevator elevator, ElevatorRequest request, int InitialFloorNumber, int NumberOfFloors)
         {
             if (elevator.Direction == Direction.Up && request.Direction == Direction.Up)
             {
@@ -35,11 +35,22 @@ namespace API_2.Extensions
             }
             else if (elevator.Direction == Direction.Down && request.Direction == Direction.Up)
             {
+                if (elevator.CurrentFloor < request.CurrentFloor)
+                {
+                    return false;
+                }
+
                 elevator.UpStops.Add(request.CurrentFloor);
                 elevator.UpStops.Add(request.DestinationFloor);
+
             }
             else if (elevator.Direction == Direction.Up && request.Direction == Direction.Down)
             {
+                if (elevator.CurrentFloor > request.CurrentFloor)
+                {
+                    return false;
+                }
+
                 elevator.DownStops.Add(request.CurrentFloor);
                 elevator.DownStops.Add(request.DestinationFloor);
             }
@@ -48,36 +59,30 @@ namespace API_2.Extensions
                 if (elevator.CurrentFloor <= request.CurrentFloor)
                 {
                     elevator.UpStops.Add(request.CurrentFloor);
-                    elevator.UpStops.Add(request.DestinationFloor);
                 }
                 else
                 {
                     elevator.DownStops.Add(request.CurrentFloor);
-                    elevator.UpStops.Add(request.DestinationFloor);
                 }
+
+                elevator.UpStops.Add(request.DestinationFloor);
             }
             else if (elevator.Direction == Direction.Idle && request.Direction == Direction.Down)
             {
                 if (elevator.CurrentFloor >= request.CurrentFloor)
                 {
-                    if (elevator.Destinations.Count() == 0)
-                    {
-                        elevator.DownStops.Add(request.CurrentFloor);
-                        elevator.DownStops.Add(request.DestinationFloor);
-                    }
+                    elevator.DownStops.Add(request.CurrentFloor);
                 }
                 else
                 {
-                    if (elevator.Destinations.Count() == 0)
-                    {
-                        elevator.UpStops.Add(request.CurrentFloor);
-                        elevator.DownStops.Add(request.DestinationFloor);
-                    }
+                    elevator.UpStops.Add(request.CurrentFloor);
                 }
+
+                elevator.DownStops.Add(request.DestinationFloor);
             }
             else
             {
-                // TODO: Handle as needed
+                // Do Nothing
             }
 
             elevator.UpStops = elevator.UpStops.OrderBy(x => x).Distinct().ToList();
@@ -85,11 +90,16 @@ namespace API_2.Extensions
 
             return true;
         }
+        #endregion
 
+        #region Set Destinations - Updates the elevator's destinations based on its current direction and stops
         public static void SetDestinations(this Elevator elevator)
         {
             List<int> destinations = new();
 
+            elevator.UpStops = RemoveAdjacentDuplicates(elevator.UpStops);
+            elevator.DownStops = RemoveAdjacentDuplicates(elevator.DownStops);
+
             if (elevator.Direction == Direction.Up)
             {
                 destinations.AddRange(elevator.UpStops);
@@ -101,36 +111,51 @@ namespace API_2.Extensions
                 destinations.AddRange(elevator.UpStops);
             }
 
-            //destinations.AddRange(OtherDestinations);
             destinations = RemoveAdjacentDuplicates(destinations);
-
             elevator.Destinations = new Queue<int>(destinations);
         }
+        #endregion
+
+        #region Remove Stops
         public static void RemoveStops(this Elevator elevator, int floor)
         {
+            
             if (elevator.Direction == Direction.Up)
             {
-                elevator.UpStops.Remove(floor);
+                if (elevator.UpStops.Any())
+                {
+                    elevator.UpStops.Remove(floor);
+                }
+                else
+                {
+                    elevator.DownStops.Remove(floor);
+                }
+                
             }
             else if (elevator.Direction == Direction.Down)
             {
-                elevator.DownStops.Remove(floor);
-            }
-            else
-            {
-                // TODO: Idle. Handle as needed
+                if (elevator.DownStops.Any())
+                {
+                    elevator.DownStops.Remove(floor);
+                }
+                else
+                {
+                    elevator.UpStops.Remove(floor);
+                }
             }
         }
+        #endregion
 
+        #region Remove Adjacent Duplicates - Remove consecutive duplicates from a list of integers
         private static List<int> RemoveAdjacentDuplicates(List<int> numbers)
         {
-            if (numbers == null || numbers.Count <= 1)
+            if (numbers == null || numbers.Count == 0)
             {
-                return numbers; // No duplicates possible or nothing to do
+                return new List<int>();
             }
 
-            List<int> result = new List<int>();
-            result.Add(numbers[0]); // Always add the first element
+            var result = new List<int>();
+            result.Add(numbers.First());
 
             for (int i = 1; i < numbers.Count; i++)
             {
@@ -139,7 +164,10 @@ namespace API_2.Extensions
                     result.Add(numbers[i]);
                 }
             }
+
             return result;
         }
+        #endregion
+
     }
 }

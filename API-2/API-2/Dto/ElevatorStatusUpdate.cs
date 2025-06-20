@@ -6,5 +6,6 @@ namespace API_2.Dto
     {
         public List<Elevator> Elevators { get; set; } = new List<Elevator>();
         public List<PendingElevatorRequest> Requests { get; set; } = new List<PendingElevatorRequest>();
+        public List<ElevatorPassenger> Passengers { get; set; } = new List<ElevatorPassenger>();
     }
 }

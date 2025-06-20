@@ -5,78 +5,72 @@ using API_2.Extensions;
 using API_2.Hubs;
 using API_2.Models;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.OpenApi.Extensions;
 
 namespace API_2.Services
 {
     public class ElevatorSystemService
     {
+        private readonly ElevatorSystemStatusUpdateService _elevatorSystemStatusUpdateService;
         private readonly IHubContext<ElevatorHub> _hubContext;
-        private ConcurrentBag<Elevator> _elevators;
         private ConcurrentBag<ELevatorRequestStatus> _elevatorRequests { get; set; } = new();
+        private ConcurrentBag<Elevator> _elevators;
+       
         private const int INITIAL_ELEVATOR_ID = 1;
 
-        private readonly TaskCompletionSource _startSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task StartSignal => _startSignal.Task;
+        private int NumberOfFloors { get; set; }
+        private int NumberOfElevators { get; set; }
+        private int InitialFloorNumber { get; set; }
 
-
-        public ElevatorSystemService(IHubContext<ElevatorHub> hubContext)
+        public ElevatorSystemService(
+            ElevatorSystemStatusUpdateService elevatorSystemStatusUpdateService,
+            IHubContext<ElevatorHub> hubContext)
         {
-            _hubContext = hubContext;
             _elevators = new ConcurrentBag<Elevator>();
+            _elevatorSystemStatusUpdateService = elevatorSystemStatusUpdateService;
+            _hubContext = hubContext;
         }
 
-        #region TriggerToStartSignal
-        public void TriggerToStartSignal()
+        #region Initialize Elevators
+        public void InitializeElevators(int intialFloorNumber, int numberOfFloors, int numberOfElevators)
         {
-            _startSignal.TrySetResult();
-        }
-        #endregion
+            NumberOfFloors = numberOfFloors;
+            NumberOfElevators = numberOfElevators;
+            InitialFloorNumber = intialFloorNumber;
 
-        #region
-        public void InitializeElevators(int count)
-        {
             var elevators = Enumerable
-                .Range(INITIAL_ELEVATOR_ID, count)
+                .Range(INITIAL_ELEVATOR_ID, NumberOfElevators)
                 .Select(id => new Elevator(id));
 
             _elevators = new ConcurrentBag<Elevator>(elevators);
         }
         #endregion
 
-        #region
-        public async Task RequestElevator(ElevatorRequest request)
+        #region Request Elevator
+        public void RequestElevator(ElevatorRequest request)
         {
             var elevator = GetBestElevator(request);
 
             if (elevator is not null)
             {
-                var isAddedToElevator = elevator.AddStops(request);
-
-                if (!isAddedToElevator)
-                {
-                    elevator = GetIdleElevator(request);
-
-                    if (elevator is not null)
-                    {
-                        isAddedToElevator = elevator.AddStops(request);
-                    }
-                }
+                var isAccommodated = elevator.AddStops(request, InitialFloorNumber, NumberOfFloors);
 
                 var requestStatus = new ELevatorRequestStatus
                 {
                     ElevatorRequest = request,
-                    IsAccommodated = isAddedToElevator
+                    IsAccommodated = isAccommodated,
+                    ElevatorId = isAccommodated ? elevator.Id : 0
                 };
 
                 _elevatorRequests.Add(requestStatus);
 
-                if (isAddedToElevator)
+                if (isAccommodated)
                 {
-                    SetDirectionForIdleElevator(elevator, request);
+                    if (elevator.Direction == Direction.Idle)
+                    {
+                        elevator.SetDirection(request.Direction);
+                    }
 
                     elevator.SetDestinations();
-                    elevator.SetPassengerDestinations();
                 }
 
                 return;
@@ -86,7 +80,7 @@ namespace API_2.Services
         }
         #endregion
 
-        #region
+        #region StepAllElevatorAsync
         public async Task StepAllElevatorAsync()
         {
             var tasks = new List<Task>();
@@ -98,27 +92,7 @@ namespace API_2.Services
             }
 
             await Task.WhenAll(tasks);
-        }
-        #endregion
 
-        #region
-        public ElevatorStatusUpdate GetElevatorUpdates()
-        {
-            var pendingRequest = _elevatorRequests
-                    .Select(x => x.ElevatorRequest)
-                    .GroupBy(i => i.CurrentFloor)
-                    .Select(x => new PendingElevatorRequest
-                    {
-                        Floor = x.Key,
-                        Destinations = x.Select(i => i.DestinationFloor).Distinct().OrderBy(x => x).ToList()
-                    })
-                    .ToList();
-
-            return new ElevatorStatusUpdate
-            {
-                Requests = pendingRequest,
-                Elevators = _elevators.ToList()
-            };
         }
         #endregion
 
@@ -128,43 +102,45 @@ namespace API_2.Services
             if (elevator.Destinations.Count == 0)
             {
                 elevator.SetDirection(Direction.Idle);
-                elevator.SetStatus(Status.Idle.GetDisplayName());
+                elevator.SetStatus(Status.Idle.GetDescription());
                 return;
             }
 
             var targetDestination = elevator.Destinations.Peek();
 
-
             if (elevator.CurrentFloor < targetDestination)
             {
                 elevator.SetCurrentFloor(elevator.CurrentFloor + 1);
                 elevator.SetDirection(Direction.Up);
-                elevator.SetStatus(Status.MovingUp.GetDisplayName());
+                elevator.SetStatus(Status.MovingUp.GetDescription());
             }
             else if (elevator.CurrentFloor > targetDestination)
             {
                 elevator.SetCurrentFloor(elevator.CurrentFloor - 1);
                 elevator.SetDirection(Direction.Down);
-                elevator.SetStatus(Status.MovingDown.GetDisplayName());
+                elevator.SetStatus(Status.MovingDown.GetDescription());
             }
-            else // elevator.CurrentFloor == targetDestination =>  Elevator Arrived at the target destination
+            else // Elevator Arrived at the target destination
             {
                 elevator.Destinations.Dequeue();
-                elevator.RemoveStops(targetDestination);
-                elevator.SetStatus(Status.LoadingUnloading.GetDisplayName());
 
-                elevator.SetPassengerDestinations();
+                elevator.RemoveStops(targetDestination);
+                elevator.SetStatus(Status.DoorsOpen.GetDescription());
 
                 RemoveElevatorRequests(elevator);
-
+                
                 if (elevator.Destinations.Count == 0)
                 {
-                    // TODO: Check this logic
                     elevator.SetDirection(Direction.Idle);
-                    elevator.SetStatus(Status.Idle.GetDisplayName());
+                    elevator.SetStatus(Status.Idle.GetDescription());
 
                     // Assign Elevator to Request that are not yet accommodated
-                    await AssignElevatorToUnAccommodatedRequest(elevator);
+                   
+                    AssignElevatorToUnAccommodatedRequest(elevator);
+                }
+                else if (elevator.CurrentFloor == InitialFloorNumber || elevator.CurrentFloor == NumberOfFloors)
+                {
+                    AssignElevatorToUnAccommodatedRequest(elevator);
                 }
                 else
                 {
@@ -174,86 +150,138 @@ namespace API_2.Services
                     {
                         elevator.SetDirection(Direction.Down);
                     }
-                    else
+                    else if (elevator.CurrentFloor < nextDestination)
                     {
                         elevator.SetDirection(Direction.Up);
                     }
-                }
-            }
-        }
+                    else
+                    {
+                        while (nextDestination == elevator.CurrentFloor)
+                        {
+                            elevator.RemoveStops(nextDestination);
+                            nextDestination = elevator.Destinations.Peek();
+                        }
 
+                        var direction = elevator.CurrentFloor > nextDestination ? Direction.Down : Direction.Up;
+                        elevator.SetDirection(direction);
+                    }
+                }
+
+            }
+
+            await Task.Delay(100);
+        }
         #endregion
 
-        #region
-        private async Task AssignElevatorToUnAccommodatedRequest(Elevator elevator)
+        #region Assign Elevator To UnAccommodated Request
+        private void AssignElevatorToUnAccommodatedRequest(Elevator elevator)
         {
-            var requestNeedsAccommodation = _elevatorRequests
+            if (elevator.Direction == Direction.Idle)
+            {
+                var requestNeedsAccommodation = _elevatorRequests
                 .Where(x => !x.IsAccommodated)
                 .OrderBy(x => Math.Abs(elevator.CurrentFloor - x.ElevatorRequest.CurrentFloor))
                 .FirstOrDefault();
 
+                if (requestNeedsAccommodation is not null)
+                {
+                    var nearestElevatorRequestDirection = requestNeedsAccommodation.ElevatorRequest.Direction;
 
-            if (requestNeedsAccommodation is not null)
+                    var requestsToAccommodate = nearestElevatorRequestDirection == Direction.Up
+                        ? _elevatorRequests.Where(x => x.ElevatorRequest.Direction == Direction.Up
+                                                    && x.ElevatorRequest.CurrentFloor >= elevator.CurrentFloor
+                                                    && !x.IsAccommodated).ToList()
+                        : _elevatorRequests.Where(x => x.ElevatorRequest.Direction == Direction.Down
+                                                    && x.ElevatorRequest.CurrentFloor <= elevator.CurrentFloor
+                                                    && !x.IsAccommodated).ToList();
+
+                    var elevatorRequest = _elevatorRequests.ToList();
+                    var elevatorsToRemove = requestsToAccommodate.Select(x => x.ElevatorRequest).ToList();
+
+                    elevatorRequest.RemoveAll(x => elevatorsToRemove.Select(x => x.Id).Contains(x.ElevatorRequest.Id));
+                    _elevatorRequests = new ConcurrentBag<ELevatorRequestStatus>(elevatorRequest);
+
+                    elevator.SetDirection(nearestElevatorRequestDirection);
+                    foreach (var requestToAccommodate in requestsToAccommodate)
+                    {
+                        var request = requestToAccommodate.ElevatorRequest;
+                        var isAccommodated = elevator.AddStops(request, InitialFloorNumber, NumberOfFloors);
+
+                        var elevatorRequestStatus = new ELevatorRequestStatus
+                        {
+                            ElevatorRequest = request,
+                            IsAccommodated = isAccommodated,
+                            ElevatorId = isAccommodated ? elevator.Id : 0
+                        };
+
+                        _elevatorRequests.Add(elevatorRequestStatus);
+                    }
+
+                    elevator.SetDestinations();
+                }
+            }
+
+            else
             {
-                var nearestElevatorRequestDirection = requestNeedsAccommodation.ElevatorRequest.Direction;
-
-                var requestsToAccommodate = nearestElevatorRequestDirection == Direction.Up
-                    ? _elevatorRequests.Where(x => x.ElevatorRequest.Direction == Direction.Up && x.ElevatorRequest.CurrentFloor >= elevator.CurrentFloor).ToList()
-                    : _elevatorRequests.Where(x => x.ElevatorRequest.Direction == Direction.Down && x.ElevatorRequest.CurrentFloor <= elevator.CurrentFloor).ToList();
-
+                var direction = elevator.CurrentFloor == InitialFloorNumber ? Direction.Up : Direction.Down;
+                var requestsToAccommodate = direction == Direction.Up
+                        ? _elevatorRequests.Where(x => x.ElevatorRequest.Direction == Direction.Up
+                                                    && x.ElevatorRequest.CurrentFloor >= elevator.CurrentFloor
+                                                    && !x.IsAccommodated).ToList()
+                        : _elevatorRequests.Where(x => x.ElevatorRequest.Direction == Direction.Down
+                                                    && x.ElevatorRequest.CurrentFloor <= elevator.CurrentFloor
+                                                    && !x.IsAccommodated).ToList();
 
                 var elevatorRequest = _elevatorRequests.ToList();
                 var elevatorsToRemove = requestsToAccommodate.Select(x => x.ElevatorRequest).ToList();
 
                 elevatorRequest.RemoveAll(x => elevatorsToRemove.Select(x => x.Id).Contains(x.ElevatorRequest.Id));
-
                 _elevatorRequests = new ConcurrentBag<ELevatorRequestStatus>(elevatorRequest);
 
+                elevator.SetDirection(direction);
                 foreach (var requestToAccommodate in requestsToAccommodate)
                 {
-
                     var request = requestToAccommodate.ElevatorRequest;
-
-                    SetDirectionForIdleElevator(elevator, request);
-
-                    var isAccommodated = elevator.AddStops(request);
+                    var isAccommodated = elevator.AddStops(request, InitialFloorNumber, NumberOfFloors);
 
                     var elevatorRequestStatus = new ELevatorRequestStatus
                     {
                         ElevatorRequest = request,
                         IsAccommodated = isAccommodated,
+                        ElevatorId = isAccommodated ? elevator.Id : 0
                     };
 
                     _elevatorRequests.Add(elevatorRequestStatus);
                 }
 
                 elevator.SetDestinations();
-                elevator.SetPassengerDestinations();
-                elevator.SetStatus(nearestElevatorRequestDirection.GetDisplayName());
             }
-        }
 
+            
+        }
         #endregion
 
-        #region
+        #region Get Best Elevator
         private Elevator? GetBestElevator(ElevatorRequest request)
         {
-            List<Elevator> sameDirectionElevators = new();
+            var idleElevatorsOntheSameFloorOfRequest = _elevators
+                .Where(x => x.Direction == Direction.Idle && x.CurrentFloor == request.CurrentFloor)
+                .ToList();
 
-            if (request.Direction == Direction.Up)
+            if (idleElevatorsOntheSameFloorOfRequest.Any())
             {
-                sameDirectionElevators = _elevators
-                    .Where(x => x.Direction == Direction.Up
-                             && x.CurrentFloor <= request.CurrentFloor)
-                    .ToList();
+                return idleElevatorsOntheSameFloorOfRequest.First();
             }
-            else if (request.Direction == Direction.Down)
-            {
-                sameDirectionElevators = _elevators
-                    .Where(x => x.Direction == Direction.Down
-                             && x.CurrentFloor >= request.CurrentFloor)
-                    .ToList();
-            }
+
+            var sameDirectionElevators = request.Direction == Direction.Up
+            ? _elevators.Where(x => x.Direction == Direction.Up
+                    && x.CurrentFloor <= request.CurrentFloor
+                    && x.CurrentFloor < request.DestinationFloor)
+              .ToList()
+            : _elevators.Where(x => x.Direction == Direction.Down
+                    && x.CurrentFloor >= request.CurrentFloor
+                    && x.CurrentFloor > request.DestinationFloor)
+              .ToList();
 
             if (sameDirectionElevators.Any())
             {
@@ -276,79 +304,103 @@ namespace API_2.Services
                 .ThenBy(e => Math.Abs(e.CurrentFloor - request.CurrentFloor))
                 .FirstOrDefault();
         }
-
         #endregion
 
-        #region
-        private Elevator? GetIdleElevator(ElevatorRequest request)
+        #region Remove Elevator Requests
+        private void RemoveElevatorRequests(Elevator elevator)
         {
-            var idleElevators = _elevators.Where(x => x.Direction == Direction.Idle);
+            var requests = GetElevatorRequestsToRemove(elevator);
+            var elevatorRequest = _elevatorRequests.ToList();
 
-            if (idleElevators is not null && idleElevators.Any())
+            elevatorRequest.RemoveAll(x => requests.Select(x => x.Id).Contains(x.ElevatorRequest.Id));
+
+            _elevatorRequests = new ConcurrentBag<ELevatorRequestStatus>(elevatorRequest);
+        }
+        #endregion
+
+        private List<ElevatorRequest> GetElevatorRequestsToRemove(Elevator elevator)
+        {
+            var query = _elevatorRequests
+                .Where(x => x.ElevatorId == elevator.Id) // x.IsAccommodated && 
+                .Select(x => x.ElevatorRequest)
+                .Where(x => x.CurrentFloor == elevator.CurrentFloor && elevator.Destinations.ToList().Contains(x.DestinationFloor)) // && x.Direction == elevator.Direction
+                .AsQueryable();
+            
+            if (elevator.Destinations.Count > 0)
             {
-                return idleElevators
-                    .OrderBy(x => Math.Abs(x.CurrentFloor - request.CurrentFloor))
-                    .FirstOrDefault();
+                var nextDestination = elevator.Destinations.Peek();
+                Direction? nextDirection = null;
+
+                if (nextDestination > elevator.CurrentFloor)
+                {
+                    nextDirection = Direction.Up;
+                }
+                else if (nextDestination < elevator.CurrentFloor)
+                {
+                    nextDirection = Direction.Down;
+                }
+                else
+                {
+                    return new List<ElevatorRequest>();
+                }
+
+                return query.Where(x => x.Direction == nextDirection).ToList();
             }
 
-            return null;
+            return query.ToList();
+        }
+        
+        public IEnumerable<Elevator> GetElevators()
+        {
+            return _elevators.ToList();
         }
 
-        #endregion
+        public IEnumerable<ELevatorRequestStatus> GetElevatorRequests()
+        {
+            return _elevatorRequests.ToList();
+        }
 
-        #region
-        public async Task SendUpdateToClientAsync()
+        /// <summary>
+        /// For UI use only.
+        /// </summary>
+        /// <returns></returns>
+        public async Task SendUpdateToClient()
         {
             var elevatorUpdate = GetElevatorUpdates();
             await _hubContext.Clients.All.SendAsync("ElevatorStatusUpdated", elevatorUpdate);
         }
 
-        #endregion
-
-        #region
-        private void RemoveElevatorRequests(Elevator elevator)
+        private ElevatorStatusUpdate GetElevatorUpdates()
         {
-            var requests = _elevatorRequests
-                .Where(x => x.IsAccommodated)
-                .Select(x => x.ElevatorRequest)
-                .Where(x => x.CurrentFloor == elevator.CurrentFloor && x.Direction == elevator.Direction)
-                .ToList();
+            var elevators = GetElevators();
+            var requests = GetElevatorRequests();
+            var passengers = _elevatorSystemStatusUpdateService.GetElevatorPassenger();
 
-            var elevatorRequest = _elevatorRequests.ToList();
-            elevatorRequest.RemoveAll(x => requests.Select(x => x.Id).Contains(x.ElevatorRequest.Id));
+            var pendingRequest = requests
+                    .Select(x => x)
+                    .GroupBy(i => i.ElevatorRequest.CurrentFloor)
+                    .Select(x => new PendingElevatorRequest
+                    {
+                        Floor = x.Key,
+                        Destinations = x.Select(i => new RequestDestination
+                        {
+                            Destination = i.ElevatorRequest.DestinationFloor,
+                            ElevatorId = i.ElevatorId,
+                        })
+                        .Distinct()
+                        .OrderBy(x => x.ElevatorId)
+                        .ThenBy(x => x.Destination)
+                        .ToList()
+                    })
+                    .ToList();
 
-            _elevatorRequests = new ConcurrentBag<ELevatorRequestStatus>(elevatorRequest);
-        }
-
-        #endregion
-
-        #region
-        private void SetDirectionForIdleElevator(Elevator elevator, ElevatorRequest request)
-        {
-            if (elevator.Direction == Direction.Idle)
+            return new ElevatorStatusUpdate
             {
-                if (request.CurrentFloor > elevator.CurrentFloor)
-                {
-                    elevator.SetDirection(Direction.Up);
-                }
-                else if (request.CurrentFloor < elevator.CurrentFloor)
-                {
-                    elevator.SetDirection(Direction.Down);
-                }
-                else
-                {
-                    if (request.DestinationFloor < elevator.CurrentFloor)
-                    {
-                        elevator.SetDirection(Direction.Down);
-                    }
-                    else
-                    {
-                        elevator.SetDirection(Direction.Up);
-                    }
-                }
-            }
+                Requests = pendingRequest,
+                Elevators = elevators.ToList(),
+                Passengers = passengers.ToList(),
+            };
         }
-        #endregion
 
     }
 }

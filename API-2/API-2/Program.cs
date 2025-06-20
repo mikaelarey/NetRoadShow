@@ -7,12 +7,13 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<ElevatorSystemService>();
-
-builder.Services.AddSingleton<ElevatorSimulationBackgroundService>();
-builder.Services.AddHostedService(provider => provider.GetRequiredService<ElevatorSimulationBackgroundService>());
+builder.Services.AddSingleton<ElevatorSystemStatusUpdateService>();
 
 builder.Services.AddSingleton<ElevatorRequestBackgroundService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ElevatorRequestBackgroundService>());
+
+builder.Services.AddSingleton<ElevatorSimulationBackgroundService>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<ElevatorSimulationBackgroundService>());
 
 builder.Services.AddSingleton<ClientUpdateBackgroundService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ClientUpdateBackgroundService>());
@@ -47,6 +48,8 @@ app.UseCors("AllowAngularClient");
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHub<ElevatorHub>("/elevatorHub");
+
+// Map your SignalR Hub
+app.MapHub<ElevatorHub>("/elevatorhub"); // Clients will connect to "/elevatorhub"
 
 app.Run();

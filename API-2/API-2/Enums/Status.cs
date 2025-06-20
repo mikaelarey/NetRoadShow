@@ -1,10 +1,21 @@
-﻿namespace API_2.Enums
+﻿
+
+using System.ComponentModel;
+
+namespace API_2.Enums
 {
     public enum Status
     {
-        MovingUp,
-        MovingDown,
+        [Description("idle")]
         Idle,
-        LoadingUnloading
+
+        [Description("moving up")]
+        MovingUp,
+
+        [Description("moving down")]
+        MovingDown,
+
+        [Description("doors are open")]
+        DoorsOpen
     }
 }

@@ -15,47 +15,39 @@ namespace API_2.Test.Services
 {
     public class ElevatorSystemServiceTest
     {
-        private readonly IHubContext<ElevatorHub> _fakeHubContext;
-        private readonly IHubClients _fakeClients;
-        private readonly IClientProxy _fakeClientProxy;
         private readonly ElevatorSystemService _elevatorSystemService;
+        private readonly IHubContext<ElevatorHub> _hubContext;
+        private readonly ElevatorSystemStatusUpdateService _elevatorSystemStatusUpdateService;
 
         public ElevatorSystemServiceTest()
         {
-            _fakeHubContext = A.Fake<IHubContext<ElevatorHub>>();
-            _fakeClients = A.Fake<IHubClients>();
-            _fakeClientProxy = A.Fake<IClientProxy>();
-
-            A.CallTo(() => _fakeHubContext.Clients).Returns(_fakeClients);
-            A.CallTo(() => _fakeClients.All).Returns(_fakeClientProxy);
-
-            _elevatorSystemService = new ElevatorSystemService(_fakeHubContext);
+            _hubContext = A.Fake<IHubContext<ElevatorHub>>();
+            _elevatorSystemStatusUpdateService = A.Fake<ElevatorSystemStatusUpdateService>();
+            _elevatorSystemService = new ElevatorSystemService(_elevatorSystemStatusUpdateService, _hubContext);
         }
-
-        
-
 
         #region InitializeElevators
         [Fact]
         public void InitializeElevators_Positive_ShouldCreateCorrectNumberOfElevators()
         {
             #region Arrange
-            const int INITIAL_FLOOR = 1;
-            const int NUMBER_OF_ELEVATOR = 4;
+            const int numberOfFloors = 10;
+            const int numberOfElevators = 4;
+            const int intialFloorNumber = 1;
             #endregion
 
             #region Act
-            _elevatorSystemService.InitializeElevators(NUMBER_OF_ELEVATOR);
+            _elevatorSystemService.InitializeElevators(intialFloorNumber, numberOfFloors, numberOfElevators);
             #endregion
 
             #region Assert
             var elevators = GetPrivateElevatorsField();
-            Assert.Equal(NUMBER_OF_ELEVATOR, elevators.Count);
+            Assert.Equal(numberOfElevators, elevators.Count);
             Assert.Contains(elevators, e => e.Id == 1);
             Assert.Contains(elevators, e => e.Id == 2);
             Assert.Contains(elevators, e => e.Id == 3);
             Assert.Contains(elevators, e => e.Id == 4);
-            Assert.All(elevators, e => Assert.Equal(INITIAL_FLOOR, e.CurrentFloor));
+            Assert.All(elevators, e => Assert.Equal(intialFloorNumber, e.CurrentFloor));
             Assert.All(elevators, e => Assert.Equal(Direction.Idle, e.Direction));
             Assert.All(elevators, e => Assert.Equal(Status.Idle.GetDisplayName(), e.Status));
             #endregion
@@ -63,23 +55,10 @@ namespace API_2.Test.Services
         }
         #endregion
 
-        #region TriggerToStartSignal
-        [Fact]
-        public void TriggerToStartSignal_Positive_ShouldSetStartSignalResult()
-        {
-            #region Act
-            _elevatorSystemService.TriggerToStartSignal();
-            #endregion
-
-            #region Assert
-            Assert.True(_elevatorSystemService.StartSignal.IsCompletedSuccessfully);
-            #endregion
-        }
-        #endregion
 
         #region RequestElevator
         [Fact]
-        public async Task RequestElevator_ShouldAssignRequestToBestElevator_WhenBestElevatorAvailable()
+        public void RequestElevator_ShouldAssignRequestToBestElevator_WhenBestElevatorAvailable()
         {
             #region Arrange
             var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
@@ -99,7 +78,7 @@ namespace API_2.Test.Services
             #endregion
 
             #region Act
-            await _elevatorSystemService.RequestElevator(request);
+            _elevatorSystemService.RequestElevator(request);
             #endregion
 
             #region Assert
@@ -109,7 +88,7 @@ namespace API_2.Test.Services
         }
 
         [Fact]
-        public async Task RequestElevator_ShouldTryIdleElevatorIfBestFailsToAddStops()
+        public void RequestElevator_ShouldTryIdleElevatorIfBestFailsToAddStops()
         {
             #region Arrange
             var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
@@ -130,7 +109,7 @@ namespace API_2.Test.Services
             #endregion
 
             #region Act
-            await _elevatorSystemService.RequestElevator(request);
+            _elevatorSystemService.RequestElevator(request);
             #endregion
 
             #region Assert
@@ -140,7 +119,7 @@ namespace API_2.Test.Services
         }
 
         [Fact]
-        public async Task RequestElevator_ShouldNotAccommodateIfNoElevatorCanAddStops()
+        public void RequestElevator_ShouldNotAccommodateIfNoElevatorCanAddStops()
         {
             #region Arrange
             var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
@@ -158,7 +137,7 @@ namespace API_2.Test.Services
             #endregion
 
             #region Act
-            await _elevatorSystemService.RequestElevator(request);
+            _elevatorSystemService.RequestElevator(request);
             #endregion
 
             #region Assert
@@ -197,45 +176,7 @@ namespace API_2.Test.Services
         }
         #endregion
 
-        #region GetElevatorUpdates
-        [Fact]
-        public void GetElevatorUpdates_ShouldReturnCorrectStatusUpdate()
-        {
-            #region Arrange
-            _elevatorSystemService.InitializeElevators(2);
-            var elevators = GetPrivateElevatorsField().ToList(); // Get the actual created elevators
-
-            elevators[0].SetCurrentFloor(5);
-            elevators[0].SetDirection(Direction.Up);
-            elevators[0].Destinations.Enqueue(10);
-            elevators[0].Destinations.Enqueue(12);
-
-            elevators[1].SetCurrentFloor(2);
-            elevators[1].SetDirection(Direction.Idle);
-
-            var request1 = new ElevatorRequest(3, 8);
-            var request2 = new ElevatorRequest(3, 6);
-            var request3 = new ElevatorRequest(1, 0);
-
-            SetPrivateElevatorRequestsField(new[]
-            {
-                new ELevatorRequestStatus { ElevatorRequest = request1, IsAccommodated = false },
-                new ELevatorRequestStatus { ElevatorRequest = request2, IsAccommodated = false },
-                new ELevatorRequestStatus { ElevatorRequest = request3, IsAccommodated = true }
-            });
-
-            #endregion
-
-            #region Act
-            var update = _elevatorSystemService.GetElevatorUpdates();
-            #endregion
-
-            #region Assert
-            Assert.NotNull(update);
-            #endregion
-        }
-        #endregion
-
+        
         #region StepElevatorAsync
         [Fact]
         public async Task StepElevatorAsync_ElevatorMovesUp_WhenCurrentFloorLessThanTarget()
@@ -335,25 +276,22 @@ namespace API_2.Test.Services
         #endregion
 
         #region GetBestElevator
-        [Fact]
-        public void GetBestElevator_ShouldReturnSameDirectionElevator_WhenAvailableAndCloser()
+        [Theory]
+        [InlineData(2, 10)]
+        [InlineData(10, 1)]
+        public void GetBestElevator_ShouldReturnSameDirectionElevator_WhenAvailableAndCloser(int currentFloor, int destinationFloor)
         {
             #region Arrange
-            var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
-            A.CallTo(() => mockElevator1.CurrentFloor).Returns(2);
-            A.CallTo(() => mockElevator1.Direction).Returns(Direction.Up);
+            var elevator1 = GetMockedElevator(1, 2, Direction.Up);
+            var elevator2 = GetMockedElevator(2, 10, Direction.Down);
+            var elevator3 = GetMockedElevator(3, 5, Direction.Idle);
+            var elevator4 = GetMockedElevator(4, 7, Direction.Down);
 
-            var mockElevator2 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(2)));
-            A.CallTo(() => mockElevator2.CurrentFloor).Returns(1);
-            A.CallTo(() => mockElevator2.Direction).Returns(Direction.Up); // Same direction, but further
+            var elevators = new List<Elevator> { elevator1, elevator2, elevator3, elevator4 };
+            var request = new ElevatorRequest(currentFloor, destinationFloor);
+            var expectedElevator = elevators.First(e => e.CurrentFloor == currentFloor);
 
-            var mockElevator3 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(3)));
-            A.CallTo(() => mockElevator3.CurrentFloor).Returns(5);
-            A.CallTo(() => mockElevator3.Direction).Returns(Direction.Idle);
-
-            SetPrivateElevatorsField(new[] { mockElevator1, mockElevator2, mockElevator3 });
-
-            var request = new ElevatorRequest(3, 7);
+            SetPrivateElevatorsField(elevators);
             #endregion
 
             #region Act
@@ -361,7 +299,7 @@ namespace API_2.Test.Services
             #endregion
 
             #region Assert
-            Assert.Equal(mockElevator1, result);
+            Assert.Equal(expectedElevator, result);
             #endregion
         }
 
@@ -369,21 +307,16 @@ namespace API_2.Test.Services
         public void GetBestElevator_ShouldReturnIdleElevator_WhenNoSameDirectionElevator()
         {
             #region Arrange
-            var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
-            A.CallTo(() => mockElevator1.CurrentFloor).Returns(2);
-            A.CallTo(() => mockElevator1.Direction).Returns(Direction.Down); // Wrong direction
+            var elevator1 = GetMockedElevator(1, 2, Direction.Up);
+            var elevator2 = GetMockedElevator(2, 10, Direction.Down);
+            var elevator3 = GetMockedElevator(3, 5, Direction.Idle);
+            var elevator4 = GetMockedElevator(4, 7, Direction.Down);
 
-            var mockElevator2 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(2)));
-            A.CallTo(() => mockElevator2.CurrentFloor).Returns(5);
-            A.CallTo(() => mockElevator2.Direction).Returns(Direction.Idle); // Idle and closer
+            var elevators = new List<Elevator> { elevator1, elevator2, elevator3, elevator4 };
+            var request = new ElevatorRequest(1, 10);
+            var expectedElevator = elevators.First(e => e.CurrentFloor == 5);
 
-            var mockElevator3 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(3)));
-            A.CallTo(() => mockElevator3.CurrentFloor).Returns(10);
-            A.CallTo(() => mockElevator3.Direction).Returns(Direction.Idle); // Idle but further
-
-            SetPrivateElevatorsField(new[] { mockElevator1, mockElevator2, mockElevator3 });
-
-            var request = new ElevatorRequest(3, 7);
+            SetPrivateElevatorsField(elevators);
             #endregion
 
             #region Act
@@ -391,7 +324,7 @@ namespace API_2.Test.Services
             #endregion
 
             #region Assert
-            Assert.Equal(mockElevator2, result);
+            Assert.Equal(elevator3, result);
             #endregion
         }
 
@@ -399,27 +332,16 @@ namespace API_2.Test.Services
         public void GetBestElevator_ShouldReturnElevatorWithLeastDestinationsAndClosest_WhenNoSameDirectionOrIdle()
         {
             #region Arrange
-            var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
-            mockElevator1.Destinations.Enqueue(5);
-            mockElevator1.Destinations.Enqueue(10);
+            var elevator1 = GetMockedElevator(1, 2, Direction.Up, new List<int> { 1, 2, 3, 4 });
+            var elevator2 = GetMockedElevator(2, 10, Direction.Down, new List<int> { 1, 2, 3 });
+            var elevator3 = GetMockedElevator(3, 5, Direction.Down, new List<int> { 1, 2, 3, 4 });
+            var elevator4 = GetMockedElevator(4, 7, Direction.Down, new List<int> { 1, 2, 3, 4 });
 
-            A.CallTo(() => mockElevator1.CurrentFloor).Returns(1);
-            A.CallTo(() => mockElevator1.Direction).Returns(Direction.Down);
+            var elevators = new List<Elevator> { elevator1, elevator2, elevator3, elevator4 };
+            var request = new ElevatorRequest(1, 10);
+            var expectedElevator = elevators.First(e => e.CurrentFloor == 2);
 
-            var mockElevator2 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(2)));
-            mockElevator1.Destinations.Enqueue(15);
-            A.CallTo(() => mockElevator2.CurrentFloor).Returns(10);
-            A.CallTo(() => mockElevator2.Direction).Returns(Direction.Up);
-
-            var mockElevator3 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(3)));
-            mockElevator1.Destinations.Enqueue(2);
-
-            A.CallTo(() => mockElevator3.CurrentFloor).Returns(7);
-            A.CallTo(() => mockElevator3.Direction).Returns(Direction.Down);
-
-            SetPrivateElevatorsField(new[] { mockElevator1, mockElevator2, mockElevator3 });
-
-            var request = new ElevatorRequest(3, 7);
+            SetPrivateElevatorsField(elevators);
             #endregion
 
             #region Act
@@ -427,8 +349,20 @@ namespace API_2.Test.Services
             #endregion
 
             #region Assert
-            Assert.Equal(mockElevator3, result);
+            Assert.Equal(elevator2, result);
             #endregion
+        }
+
+        private Elevator GetMockedElevator(int id, int currentFloor, Direction direction, List<int>? destinations = null) 
+        {
+            var elevator = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(id)));
+            A.CallTo(() => elevator.CurrentFloor).Returns(currentFloor);
+            A.CallTo(() => elevator.Direction).Returns(direction);
+
+            destinations = destinations ?? new List<int>();
+            elevator.Destinations = new Queue<int>(destinations);
+           
+            return elevator;
         }
         #endregion
 

@@ -1,4 +1,5 @@
-﻿using API_2.Services;
+﻿using API_2.Dto;
+using API_2.Services;
 
 namespace API_2.BackgroundServices
 {
@@ -7,16 +8,13 @@ namespace API_2.BackgroundServices
         private readonly ElevatorSystemService _elevatorSystemService;
         private const int TRAVEL_AND_LOADING_TIME = 10000;
 
-        public ElevatorSimulationBackgroundService(ElevatorSystemService elevatorService)
+        public ElevatorSimulationBackgroundService(ElevatorSystemService elevatorSystemService)
         {
-            _elevatorSystemService = elevatorService;
+            _elevatorSystemService = elevatorSystemService;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await _elevatorSystemService.StartSignal;       // Wait for SignalR readiness
-            _elevatorSystemService.InitializeElevators(4);
-
             while (!stoppingToken.IsCancellationRequested)
             {
                 await _elevatorSystemService.StepAllElevatorAsync();

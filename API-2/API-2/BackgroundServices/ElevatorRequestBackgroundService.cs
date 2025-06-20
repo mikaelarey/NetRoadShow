@@ -1,38 +1,41 @@
-﻿
-using API_2.Dto;
+﻿using API_2.Dto;
 using API_2.Services;
+
 namespace API_2.BackgroundServices
 {
     public class ElevatorRequestBackgroundService : BackgroundService
     {
-        private readonly ElevatorSystemService elevatorSystemService;
-        private const int TRAVEL_AND_LOADING_TIME = 5000;
+        private readonly ElevatorSystemService _elevatorSystemService;
+        private const int REQUEST_FREQUENCY = 5000;
 
-        public ElevatorRequestBackgroundService(ElevatorSystemService elevatorService)
+        public ElevatorRequestBackgroundService(ElevatorSystemService elevatorSystemService)
         {
-            elevatorSystemService = elevatorService;
+            _elevatorSystemService = elevatorSystemService;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            if (elevatorSystemService.StartSignal != null && !elevatorSystemService.StartSignal.IsCompleted)
+            const int numberOfFloors = 10;
+            const int numberOfElevators = 4;
+            const int intialFloorNumber = 1;
+
+            _elevatorSystemService.InitializeElevators(intialFloorNumber, numberOfFloors, numberOfElevators);
+            await _elevatorSystemService.SendUpdateToClient();
+
+            while (!stoppingToken.IsCancellationRequested)
             {
-                while (!stoppingToken.IsCancellationRequested)
+                await Task.Delay(REQUEST_FREQUENCY);
+
+                Random rnd = new Random();
+                int floorFrom = rnd.Next(intialFloorNumber, numberOfFloors + 1);
+                int floorTo = rnd.Next(intialFloorNumber, numberOfFloors + 1);
+
+                if (floorFrom != floorTo && floorFrom <= numberOfFloors && floorTo <= numberOfFloors)
                 {
-                    await Task.Delay(TRAVEL_AND_LOADING_TIME);
-
-                    Random rnd = new Random();
-                    int floorFrom = rnd.Next(1, 10);
-                    int floorTo = rnd.Next(1, 10);
-
-                    if (floorFrom != floorTo)
-                    {
-                        var elevatorRequest = new ElevatorRequest(floorFrom, floorTo);
-                        await elevatorSystemService.RequestElevator(elevatorRequest);
-                    }
+                    var elevatorRequest = new ElevatorRequest(floorFrom, floorTo);
+                    _elevatorSystemService.RequestElevator(elevatorRequest);
                 }
             }
-
         }
     }
 }
