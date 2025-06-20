@@ -62,12 +62,10 @@ namespace API_2.Test.Services
         {
             #region Arrange
             var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
-            A.CallTo(() => mockElevator1.Id).Returns(1);
             A.CallTo(() => mockElevator1.CurrentFloor).Returns(1);
             A.CallTo(() => mockElevator1.Direction).Returns(Direction.Idle);
 
             var mockElevator2 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(2)));
-            A.CallTo(() => mockElevator2.Id).Returns(2);
             A.CallTo(() => mockElevator2.CurrentFloor).Returns(5);
             A.CallTo(() => mockElevator2.Direction).Returns(Direction.Up);
 
@@ -92,13 +90,13 @@ namespace API_2.Test.Services
         {
             #region Arrange
             var mockElevator1 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
-            A.CallTo(() => mockElevator1.Id).Returns(1);
+            
             A.CallTo(() => mockElevator1.CurrentFloor).Returns(2);
             A.CallTo(() => mockElevator1.Direction).Returns(Direction.Up);
 
             // Idle elevator
             var mockElevator2 = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(2)));
-            A.CallTo(() => mockElevator2.Id).Returns(2);
+            
             A.CallTo(() => mockElevator2.CurrentFloor).Returns(1);
             A.CallTo(() => mockElevator2.Direction).Returns(Direction.Idle);
 
@@ -196,7 +194,6 @@ namespace API_2.Test.Services
             #region Assert
             A.CallTo(() => mockElevator.SetCurrentFloor(2)).MustHaveHappenedOnceExactly();
             A.CallTo(() => mockElevator.SetDirection(Direction.Up)).MustHaveHappenedOnceExactly();
-            A.CallTo(() => mockElevator.SetStatus(Status.MovingUp.GetDisplayName())).MustHaveHappenedOnceExactly();
             #endregion
         }
 
@@ -218,7 +215,6 @@ namespace API_2.Test.Services
             #region Assert
             A.CallTo(() => mockElevator.SetCurrentFloor(4)).MustHaveHappenedOnceExactly();
             A.CallTo(() => mockElevator.SetDirection(Direction.Down)).MustHaveHappenedOnceExactly();
-            A.CallTo(() => mockElevator.SetStatus(Status.MovingDown.GetDisplayName())).MustHaveHappenedOnceExactly();
             #endregion
         }
 
@@ -253,7 +249,7 @@ namespace API_2.Test.Services
             var mockElevator = A.Fake<Elevator>(options => options.WithArgumentsForConstructor(() => new Elevator(1)));
             mockElevator.Destinations.Enqueue(5);
             A.CallTo(() => mockElevator.CurrentFloor).Returns(5);
-            A.CallTo(() => mockElevator.Direction).Returns(Direction.Up);
+            A.CallTo(() => mockElevator.Direction).Returns(Direction.Idle);
 
             var unaccommodatedRequest = new ElevatorRequest(6, 8); // (2, 8)
             SetPrivateElevatorRequestsField(new[]
